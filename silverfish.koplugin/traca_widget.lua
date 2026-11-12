@@ -59,6 +59,24 @@ local function faixas(s, campo, rotulo)
     return out
 end
 
+-- O que ela responde a um carinho, como na tela dela (TracaTela:carinho): algumas falas para quando conta
+-- (as da espécie, se tiver; a traça tem uma só), a de quando já chega, e a de quando está no casulo.
+local function falasDeCarinho(s)
+    local T = require("traca_lingua").t
+    local aceito, visto = {}, {}
+    for _ = 1, 12 do
+        local ok, f = pcall(Estado.falaPropria, s, "carinho")
+        if ok and f and not visto[f] then visto[f] = true; aceito[#aceito + 1] = f end
+    end
+    if #aceito == 0 then aceito[1] = T"Hm. Tá. Pode continuar." end
+    local okC, casulo = pcall(Estado.falaPropria, s, "casulo")
+    return {
+        aceito = aceito,
+        chega = T"Já chega de carinho por agora.",
+        casulo = (okC and casulo) or T"(escondida na lombada; leia uma página para ela sair)",
+    }
+end
+
 function Widget.dados(s, agora)
     local fase = Estado.fase(s)
     local prog = Estado.progressoFase(s)
@@ -101,6 +119,10 @@ function Widget.dados(s, agora)
             r.dormindo = desenho(fase ~= "ovo" and Desenho.resolver(repouso) == repouso and repouso or fase)
             return r
         end)(),
+        -- Carinho pelo widget (tocar a Traça): a regra é a de Estado.carinho, e as falas, as da tela dela.
+        carinho_em = s.carinho_em or 0,
+        carinho_intervalo = Estado.CARINHO_INTERVALO,
+        falas_carinho = falasDeCarinho(s),
         ultima_refeicao = s.ultima_refeicao or 0,
         refeicao_recente = Estado.REFEICAO_RECENTE,
         vazio_desde = s.vazio_desde,
@@ -129,6 +151,22 @@ end
 -- Um toque no widget deixa widget/abrir ("silverfish", "livro" ou "inicio", e a hora) e abre o KOReader;
 -- aqui ele é atendido. Um pedido velho (o KOReader não abriu logo) é jogado fora sem fazer nada.
 local VALIDADE = 60
+
+--- Os carinhos dados pelo widget desde a última vez (widget/carinhos, uma hora por linha), já apagados do
+-- arquivo, em ordem. O widget não mexe no estado da Traça (o KOReader o guarda na memória e o salvaria por
+-- cima): ele anota, e a Traça aplica aqui.
+function Widget.carinhos(pasta_plugin)
+    local arquivo = pasta_plugin .. "/widget/carinhos"
+    if lfs.attributes(arquivo, "mode") ~= "file" then return {} end
+    local f = io.open(arquivo, "r")
+    local texto = f and f:read("*a") or ""
+    if f then f:close() end
+    os.remove(arquivo)
+    local horas = {}
+    for h in texto:gmatch("%d+") do horas[#horas + 1] = tonumber(h) end
+    table.sort(horas)
+    return horas
+end
 
 --- Lê e apaga o pedido do widget, se houver um recente. Devolve "silverfish", "livro", "inicio" ou nil.
 function Widget.pedido(pasta_plugin)

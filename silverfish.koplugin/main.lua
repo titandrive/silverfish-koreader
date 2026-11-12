@@ -159,9 +159,22 @@ end
 -- Primeira abertura e "abrir ao iniciar" (só uma vez por sessão do KOReader, na biblioteca)
 local ja_abriu_nesta_sessao = false
 
+--- Aplica os carinhos dados no widget de Android (tocando a Traça), cada um na hora em que foi dado e com a
+-- regra de sempre (um por hora, nada no casulo).
+function Traca:carinhosDoWidget()
+    local okW, WidgetExport = pcall(require, "traca_widget")
+    if not okW or self:emSimulacao() then return end
+    local mudou = false
+    for _, hora in ipairs(WidgetExport.carinhos(self.path)) do
+        if Estado.carinho(self.estado, hora) then mudou = true end
+    end
+    if mudou then self:salvar(true) end
+end
+
 --- Atende um toque no widget de Android (traca_widget.lua): abre a Traça, o último livro ou a tela inicial.
 -- Devolve true se havia um pedido.
 function Traca:atenderWidget()
+    self:carinhosDoWidget()
     local okW, WidgetExport = pcall(require, "traca_widget")
     local acao = okW and WidgetExport.pedido(self.path)
     if not acao then return false end
