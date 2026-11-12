@@ -519,6 +519,11 @@ function Traca:salvar(com_imagem)
     -- o widget de Android lê widget/estado.json na pasta do plugin (traca_widget.lua)
     local okW, WidgetExport = pcall(require, "traca_widget")
     if okW then WidgetExport.exportar(self.path, self.estado) end
+    -- e avisa os outros plugins que ela mudou (o Syncest sincroniza quando ouve isto); no próximo ciclo, para
+    -- não disparar no meio do evento que fez salvar
+    UIManager:nextTick(function()
+        UIManager:broadcastEvent(require("ui/event"):new("SilverfishChanged"))
+    end)
 end
 
 -- escolher = true só quando o Kindle vai dormir (aoDormir): nos outros redesenhos, que ninguém vê, a fala
