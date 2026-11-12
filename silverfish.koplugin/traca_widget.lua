@@ -41,6 +41,35 @@ local function falaSemEfeito(s, agora)
     return ok and texto or nil
 end
 
+-- A linha do tempo das falas: o que ela diria a cada PASSO_FALA nas próximas 24 horas, para o widget trocar a
+-- fala de 20 em 20 minutos (como o cartão da Home) mesmo sem o KOReader aberto. Cada fala é sorteada numa
+-- cópia da Traça levada até aquela hora (barriga e humor caindo, noite, casulo), então combina com como ela
+-- estará; e as falas da cópia não voltam para a Traça de verdade.
+local PASSO_FALA = 20 * 60
+local FALAS_NO_DIA = 72
+
+local function copiaProfunda(t, vistos)
+    if type(t) ~= "table" then return t end
+    vistos = vistos or {}
+    if vistos[t] then return vistos[t] end
+    local c = {}
+    vistos[t] = c
+    for k, v in pairs(t) do c[copiaProfunda(k, vistos)] = copiaProfunda(v, vistos) end
+    return c
+end
+
+local function linhaDoTempo(s, agora)
+    local copia = copiaProfunda(s)
+    local falas = {}
+    for i = 0, FALAS_NO_DIA - 1 do
+        local hora = agora + i * PASSO_FALA
+        Estado.passarTempo(copia, hora)
+        local ok, texto = pcall(Estado.fala, copia, hora, nil, nil, "home")
+        falas[#falas + 1] = ok and texto or ""
+    end
+    return falas
+end
+
 -- Faixas de rótulo (barriga ou humor) para o widget escolher o rótulo quando o valor cair com o tempo:
 -- { {min, rótulo}, ... } do maior para o menor.
 local function faixas(s, campo, rotulo)
@@ -100,6 +129,8 @@ function Widget.dados(s, agora)
         faixas_barriga = faixas(s, "barriga", Estado.rotuloBarriga),
         faixas_humor = faixas(s, "humor", Estado.rotuloHumor),
         fala = falaSemEfeito(s, agora),
+        falas = linhaDoTempo(s, agora),
+        passo_fala = PASSO_FALA,
         acordada = desenho(Estado.sprite(s, agora)),
         dormindo = desenho(Estado.sprite(s, agora, true)),
         -- de noite (23h às 6h) ela dorme, a não ser que tenha lido há pouco
@@ -130,18 +161,52 @@ function Widget.dados(s, agora)
     }
 end
 
+--- Avisa o Android que o arquivo mudou (MediaScannerConnection.scanFile), pela ponte JNI do KOReader. O KOReader
+-- grava direto no armazenamento, sem passar pelo índice de arquivos do Android, e é desse índice que o widget
+-- ouve as mudanças: sem o aviso, ele só via a fala nova no relógio de 15 minutos. Fora do Android, ou se a ponte
+-- mudar, não faz nada (o widget continua no relógio).
+local function avisarAndroid(caminho)
+    local okA, android = pcall(require, "android")
+    if not (okA and type(android) == "table" and android.jni and android.app and android.app.activity) then return end
+    local ok, err = pcall(function()
+        android.jni:context(android.app.activity.vm, function(jni)
+            local env = jni.env
+            local scanner = env[0].FindClass(env, "android/media/MediaScannerConnection")
+            local metodo = env[0].GetStaticMethodID(env, scanner, "scanFile",
+                "(Landroid/content/Context;[Ljava/lang/String;[Ljava/lang/String;"
+                .. "Landroid/media/MediaScannerConnection$OnScanCompletedListener;)V")
+            local classe_texto = env[0].FindClass(env, "java/lang/String")
+            local texto = env[0].NewStringUTF(env, caminho)
+            local caminhos = env[0].NewObjectArray(env, 1, classe_texto, texto)
+            env[0].CallStaticVoidMethod(env, scanner, metodo, android.app.activity.clazz, caminhos, nil, nil)
+            if env[0].ExceptionCheck(env) ~= 0 then
+                env[0].ExceptionClear(env)
+                error("scanFile falhou")
+            end
+            env[0].DeleteLocalRef(env, caminhos)
+            env[0].DeleteLocalRef(env, texto)
+            env[0].DeleteLocalRef(env, classe_texto)
+            env[0].DeleteLocalRef(env, scanner)
+        end)
+    end)
+    if not ok then logger.dbg("Traça: aviso ao Android não funcionou:", err) end
+end
+
 --- Escreve <pasta do plugin>/widget/estado.json (por um arquivo temporário, para o widget nunca ler pela metade).
 function Widget.exportar(pasta_plugin, s)
     if type(s) ~= "table" or s.dev_simulacao then return end
     local ok, err = pcall(function()
         local dir = pasta_plugin .. "/widget"
         if lfs.attributes(dir, "mode") ~= "directory" then lfs.mkdir(dir) end
+        local inicio = os.clock()
         local texto = require("json").encode(Widget.dados(s, os.time()))
+        logger.dbg("Traça: exportado para o widget em", math.floor((os.clock() - inicio) * 1000), "ms")
         local tmp = dir .. "/estado.json.tmp"
         local f = assert(io.open(tmp, "w"))
         f:write(texto)
         f:close()
         assert(os.rename(tmp, dir .. "/estado.json"))
+        avisarAndroid((dir:gsub("//+", "/")) .. "/estado.json")
     end)
     if not ok then logger.warn("Traça: falha ao exportar para o widget:", err) end
 end
