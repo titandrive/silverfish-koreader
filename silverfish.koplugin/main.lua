@@ -480,6 +480,9 @@ function Traca:salvar(com_imagem)
     if next(self.ninhada.sleeping) then self.db:saveSetting("ninhada", self.ninhada) else self.db:delSetting("ninhada") end
     self.db:flush()
     if com_imagem then self:gerarImagem() end
+    -- o widget de Android lê widget/estado.json na pasta do plugin (traca_widget.lua)
+    local okW, WidgetExport = pcall(require, "traca_widget")
+    if okW then WidgetExport.exportar(self.path, self.estado) end
 end
 
 -- escolher = true só quando o Kindle vai dormir (aoDormir): nos outros redesenhos, que ninguém vê, a fala

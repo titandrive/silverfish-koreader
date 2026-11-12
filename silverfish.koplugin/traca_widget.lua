@@ -1,0 +1,108 @@
+--[[--
+Export para o widget de Android (Silverfish Widget): a cada vez que a Traça salva, escreve
+widget/estado.json dentro da pasta do plugin, com o que o widget precisa para se desenhar sozinho
+(nome, fase, progresso, barriga, humor, a fala, e os desenhos com as cores). O widget lê esse arquivo
+da pasta do plugin; nada aqui muda o estado da Traça.
+]]
+
+local lfs = require("libs/libkoreader-lfs")
+local logger = require("logger")
+
+local Desenho = require("traca_desenho")
+local Estado = require("traca_estado")
+local Species = require("traca_species")
+
+local Widget = {}
+
+Widget.FORMATO = 1
+
+local function desenho(nome)
+    local real = Desenho.resolver(nome)
+    local cor = Species.sprites(true)
+    local linhas = cor[real] or Species.sprites(false)[real] or {}
+    local cores = {}
+    for ch, v in pairs(cor._cores or {}) do cores[ch] = v end
+    return { nome = real, linhas = linhas, cores = cores }
+end
+
+-- A fala, sem gastar nada: a lista de recentes e as falas guardadas (lembrança, comentário, cartão) voltam
+-- como estavam.
+local function falaSemEfeito(s, agora)
+    local recentes = {}
+    for i, v in ipairs(s.falas_recentes or {}) do recentes[i] = v end
+    local guardados = {}
+    for _, k in ipairs({ "lembranca_pendente", "comentario_pendente", "cartao_pendente" }) do
+        local t = s[k]
+        if type(t) == "table" then guardados[k] = { t, t.usado, t.nao_coube } end
+    end
+    local ok, texto = pcall(Estado.fala, s, agora, nil, nil, "home")
+    s.falas_recentes = recentes
+    for _, g in pairs(guardados) do g[1].usado, g[1].nao_coube = g[2], g[3] end
+    return ok and texto or nil
+end
+
+-- Faixas de rótulo (barriga ou humor) para o widget escolher o rótulo quando o valor cair com o tempo:
+-- { {min, rótulo}, ... } do maior para o menor.
+local function faixas(s, campo, rotulo)
+    local out, ultimo = {}, nil
+    for v10 = 1000, 0, -5 do
+        local v = v10 / 10
+        local falso = { barriga = s.barriga, humor = s.humor, letras = s.letras, dev_fase = s.dev_fase }
+        falso[campo] = v
+        local ok, r = pcall(rotulo, falso)
+        if ok and r ~= ultimo then
+            if ultimo then out[#out].min = v + 0.5 end
+            out[#out + 1] = { min = 0, rotulo = r }
+            ultimo = r
+        end
+    end
+    return out
+end
+
+function Widget.dados(s, agora)
+    local fase = Estado.fase(s)
+    local prog = Estado.progressoFase(s)
+    return {
+        formato = Widget.FORMATO,
+        salvo_em = agora,
+        nome = s.nome,
+        geracao = s.geracao or 1,
+        fase = fase.nome,
+        fase_titulo = fase.titulo,
+        proxima_titulo = prog.proxima and prog.proxima.titulo or nil,
+        fracao = prog.fracao,
+        paginas_para_proxima = prog.paginas,
+        paginas = s.paginas or 0,
+        paginas_hoje = Estado.paginasHoje(s, agora),
+        barriga = s.barriga,
+        humor = s.humor,
+        hibernando = s.hibernando == true,
+        fome_por_hora = Estado.FOME_POR_HORA,
+        humor_por_hora = Estado.HUMOR_POR_HORA,
+        faixas_barriga = faixas(s, "barriga", Estado.rotuloBarriga),
+        faixas_humor = faixas(s, "humor", Estado.rotuloHumor),
+        fala = falaSemEfeito(s, agora),
+        acordada = desenho(Estado.sprite(s, agora)),
+        dormindo = desenho(Estado.sprite(s, agora, true)),
+        -- de noite (23h às 6h) ela dorme, a não ser que tenha lido há pouco
+        lendo_ate = s.ultima_refeicao and (s.ultima_refeicao + Estado.LENDO_AGORA) or 0,
+    }
+end
+
+--- Escreve <pasta do plugin>/widget/estado.json (por um arquivo temporário, para o widget nunca ler pela metade).
+function Widget.exportar(pasta_plugin, s)
+    if type(s) ~= "table" or s.dev_simulacao then return end
+    local ok, err = pcall(function()
+        local dir = pasta_plugin .. "/widget"
+        if lfs.attributes(dir, "mode") ~= "directory" then lfs.mkdir(dir) end
+        local texto = require("json").encode(Widget.dados(s, os.time()))
+        local tmp = dir .. "/estado.json.tmp"
+        local f = assert(io.open(tmp, "w"))
+        f:write(texto)
+        f:close()
+        assert(os.rename(tmp, dir .. "/estado.json"))
+    end)
+    if not ok then logger.warn("Traça: falha ao exportar para o widget:", err) end
+end
+
+return Widget
