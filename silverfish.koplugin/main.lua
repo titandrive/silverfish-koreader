@@ -159,7 +159,30 @@ end
 -- Primeira abertura e "abrir ao iniciar" (só uma vez por sessão do KOReader, na biblioteca)
 local ja_abriu_nesta_sessao = false
 
+--- Atende um toque no widget de Android (traca_widget.lua): abre a Traça, o último livro ou a tela inicial.
+-- Devolve true se havia um pedido.
+function Traca:atenderWidget()
+    local okW, WidgetExport = pcall(require, "traca_widget")
+    local acao = okW and WidgetExport.pedido(self.path)
+    if not acao then return false end
+    UIManager:scheduleIn(0.5, function()
+        if acao == "silverfish" then
+            self:onMostrarTraca()
+        elseif acao == "livro" then
+            local ultimo = G_reader_settings:readSetting("lastfile")
+            local aberto = self.ui.document and self.ui.document.file
+            if ultimo and ultimo ~= aberto and lfs.attributes(ultimo, "mode") == "file" then
+                require("apps/reader/readerui"):showReader(ultimo)
+            end
+        elseif acao == "inicio" and self.ui.document then
+            self.ui:handleEvent(require("ui/event"):new("Home"))
+        end
+    end)
+    return true
+end
+
 function Traca:aoIniciar()
+    if self:atenderWidget() then ja_abriu_nesta_sessao = true return end
     if ja_abriu_nesta_sessao or self.ui.document then return end
     ja_abriu_nesta_sessao = true
     local s = self.estado
@@ -519,6 +542,7 @@ function Traca:onResume()
     if self.pagina then self.pagina_desde = os.time() end
     Estado.passarTempo(self.estado, os.time())
     self:gerarImagem() -- deixa pronta a imagem para a próxima vez que o Kindle dormir
+    self:atenderWidget()  -- voltou para a frente por um toque no widget?
 end
 
 function Traca:onFlushSettings()

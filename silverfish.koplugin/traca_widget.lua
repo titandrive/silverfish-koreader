@@ -105,4 +105,24 @@ function Widget.exportar(pasta_plugin, s)
     if not ok then logger.warn("Traça: falha ao exportar para o widget:", err) end
 end
 
+-- Pedidos do widget ------------------------------------------------------------
+
+-- Um toque no widget deixa widget/abrir ("silverfish", "livro" ou "inicio", e a hora) e abre o KOReader;
+-- aqui ele é atendido. Um pedido velho (o KOReader não abriu logo) é jogado fora sem fazer nada.
+local VALIDADE = 60
+
+--- Lê e apaga o pedido do widget, se houver um recente. Devolve "silverfish", "livro", "inicio" ou nil.
+function Widget.pedido(pasta_plugin)
+    local arquivo = pasta_plugin .. "/widget/abrir"
+    if lfs.attributes(arquivo, "mode") ~= "file" then return nil end
+    local f = io.open(arquivo, "r")
+    local texto = f and f:read("*a") or ""
+    if f then f:close() end
+    os.remove(arquivo)
+    local acao, hora = texto:match("^(%a+)%s+(%d+)")
+    hora = tonumber(hora)
+    if not acao or not hora or math.abs(os.time() - hora) > VALIDADE then return nil end
+    return acao
+end
+
 return Widget
