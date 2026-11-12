@@ -86,6 +86,25 @@ function Widget.dados(s, agora)
         dormindo = desenho(Estado.sprite(s, agora, true)),
         -- de noite (23h às 6h) ela dorme, a não ser que tenha lido há pouco
         lendo_ate = s.ultima_refeicao and (s.ultima_refeicao + Estado.LENDO_AGORA) or 0,
+        -- Cada cara da fase, para o widget escolher como Estado.expressao, com o tempo passando sem salvar:
+        -- casulo (barriga vazia há hiberna_apos), triste (barriga ou humor abaixo de 25), dormindo (de noite),
+        -- feliz (comeu há menos de refeicao_recente, ou humor 75 ou mais), normal.
+        -- (Por enquanto só dormir tem desenho próprio, repouso_<fase>, como na tela da Traça; o ovo é o ovo.
+        -- As outras caras caem no desenho da fase, e passam a ter o seu se um dia forem desenhadas.)
+        rostos = (function()
+            local fase = Estado.fase(s).nome
+            local r = {}
+            for _, e in ipairs({ "normal", "feliz", "triste", "casulo" }) do
+                r[e] = desenho(fase .. "_" .. e)
+            end
+            local repouso = "repouso_" .. fase
+            r.dormindo = desenho(fase ~= "ovo" and Desenho.resolver(repouso) == repouso and repouso or fase)
+            return r
+        end)(),
+        ultima_refeicao = s.ultima_refeicao or 0,
+        refeicao_recente = Estado.REFEICAO_RECENTE,
+        vazio_desde = s.vazio_desde,
+        hiberna_apos = Estado.HIBERNA_APOS,
     }
 end
 
